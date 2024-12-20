@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-kratos/kratos/v2/log"
+	"google.golang.org/grpc"
+
 	"github.com/go-kratos/kratos/v2/middleware"
 	"github.com/go-kratos/kratos/v2/registry"
-	"google.golang.org/grpc"
 )
 
 func TestWithEndpoint(t *testing.T) {
@@ -44,11 +44,11 @@ func TestWithMiddleware(t *testing.T) {
 
 type mockRegistry struct{}
 
-func (m *mockRegistry) GetService(ctx context.Context, serviceName string) ([]*registry.ServiceInstance, error) {
+func (m *mockRegistry) GetService(_ context.Context, _ string) ([]*registry.ServiceInstance, error) {
 	return nil, nil
 }
 
-func (m *mockRegistry) Watch(ctx context.Context, serviceName string) (registry.Watcher, error) {
+func (m *mockRegistry) Watch(_ context.Context, _ string) (registry.Watcher, error) {
 	return nil, nil
 }
 
@@ -70,15 +70,6 @@ func TestWithTLSConfig(t *testing.T) {
 	}
 }
 
-func TestWithLogger(t *testing.T) {
-	o := &clientOptions{}
-	v := log.DefaultLogger
-	WithLogger(v)(o)
-	if !reflect.DeepEqual(v, o.logger) {
-		t.Errorf("expect %v but got %v", v, o.logger)
-	}
-}
-
 func EmptyMiddleware() middleware.Middleware {
 	return func(handler middleware.Handler) middleware.Handler {
 		return func(ctx context.Context, req interface{}) (reply interface{}, err error) {
@@ -93,7 +84,7 @@ func TestUnaryClientInterceptor(t *testing.T) {
 	resp := &struct{}{}
 
 	err := f(context.TODO(), "hello", req, resp, &grpc.ClientConn{},
-		func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
+		func(context.Context, string, any, any, *grpc.ClientConn, ...grpc.CallOption) error {
 			return nil
 		})
 	if err != nil {
@@ -104,10 +95,10 @@ func TestUnaryClientInterceptor(t *testing.T) {
 func TestWithUnaryInterceptor(t *testing.T) {
 	o := &clientOptions{}
 	v := []grpc.UnaryClientInterceptor{
-		func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		func(context.Context, string, any, any, *grpc.ClientConn, grpc.UnaryInvoker, ...grpc.CallOption) error {
 			return nil
 		},
-		func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		func(context.Context, string, any, any, *grpc.ClientConn, grpc.UnaryInvoker, ...grpc.CallOption) error {
 			return nil
 		},
 	}
@@ -128,6 +119,16 @@ func TestWithOptions(t *testing.T) {
 	}
 }
 
+func TestWithHealthCheck(t *testing.T) {
+	o := &clientOptions{
+		healthCheckConfig: `,"healthCheckConfig":{"serviceName":""}`,
+	}
+	WithHealthCheck(false)(o)
+	if !reflect.DeepEqual("", o.healthCheckConfig) {
+		t.Errorf("expect %v but got %v", "", o.healthCheckConfig)
+	}
+}
+
 func TestDial(t *testing.T) {
 	o := &clientOptions{}
 	v := []grpc.DialOption{
@@ -145,7 +146,6 @@ func TestDialConn(t *testing.T) {
 		true,
 		WithDiscovery(&mockRegistry{}),
 		WithTimeout(10*time.Second),
-		WithLogger(log.DefaultLogger),
 		WithEndpoint("abc"),
 		WithMiddleware(EmptyMiddleware()),
 	)

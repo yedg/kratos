@@ -13,7 +13,7 @@ jobs:
   build:
     strategy:
       matrix:
-        go: [ 1.16, 1.17, 1.18 ]
+        go: [ 1.20.x, 1.21.x, 1.22.x ]
     name: build & test
     runs-on: ubuntu-latest
     services:
@@ -25,27 +25,43 @@ jobs:
           ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
           ETCD_ADVERTISE_CLIENT_URLS: http://0.0.0.0:2379
       consul:
-        image: consul:latest
+        image: hashicorp/consul:1.20
         ports:
           - 8500:8500
       nacos:
-        image: nacos/nacos-server:latest
+        image: nacos/nacos-server:v2.1.0
         env:
           MODE: standalone
         ports:
           - "8848:8848"
           - "9848:9848"
       polaris:
-        image: huyuanxin/polaris-server-with-config:latest
+        image: polarismesh/polaris-standalone:latest
         ports:
           - 8090:8090
           - 8091:8091
+          - 8093:8093
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v5.1.0
         with:
           go-version: ${{ matrix.go }}
+
+      - name: Setup Environment
+        run: |
+          echo "GOPATH=$(go env GOPATH)" >> $GITHUB_ENV
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Module cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go
 
       - name: Build
         run: go build ./...

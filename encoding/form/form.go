@@ -4,10 +4,10 @@ import (
 	"net/url"
 	"reflect"
 
-	"github.com/go-kratos/kratos/v2/encoding"
-
 	"github.com/go-playground/form/v4"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/go-kratos/kratos/v2/encoding"
 )
 
 const (
@@ -17,11 +17,18 @@ const (
 	nullStr = "null"
 )
 
+var (
+	encoder = form.NewEncoder()
+	decoder = form.NewDecoder()
+)
+
+// This variable can be replaced with -ldflags like below:
+// go build "-ldflags=-X github.com/go-kratos/kratos/v2/encoding/form.tagName=form"
+var tagName = "json"
+
 func init() {
-	decoder := form.NewDecoder()
-	decoder.SetTagName("json")
-	encoder := form.NewEncoder()
-	encoder.SetTagName("json")
+	decoder.SetTagName(tagName)
+	encoder.SetTagName(tagName)
 	encoding.RegisterCodec(codec{encoder: encoder, decoder: decoder})
 }
 
@@ -67,7 +74,8 @@ func (c codec) Unmarshal(data []byte, v interface{}) error {
 	}
 	if m, ok := v.(proto.Message); ok {
 		return DecodeValues(m, vs)
-	} else if m, ok := reflect.Indirect(reflect.ValueOf(v)).Interface().(proto.Message); ok {
+	}
+	if m, ok := rv.Interface().(proto.Message); ok {
 		return DecodeValues(m, vs)
 	}
 

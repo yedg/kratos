@@ -4,12 +4,11 @@ import (
 	"errors"
 	"fmt"
 
-	httpstatus "github.com/go-kratos/kratos/v2/transport/http/status"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/status"
-)
 
-//go:generate protoc -I. --go_out=paths=source_relative:. errors.proto
+	httpstatus "github.com/go-kratos/kratos/v2/transport/http/status"
+)
 
 const (
 	// UnknownCode is unknown code for error info.
@@ -90,7 +89,7 @@ func Errorf(code int, reason, format string, a ...interface{}) error {
 // It supports wrapped errors.
 func Code(err error) int {
 	if err == nil {
-		return 200 //nolint:gomnd
+		return 200 //nolint:mnd
 	}
 	return int(FromError(err).Code)
 }
@@ -106,6 +105,9 @@ func Reason(err error) string {
 
 // Clone deep clone error to a new error.
 func Clone(err *Error) *Error {
+	if err == nil {
+		return nil
+	}
 	metadata := make(map[string]string, len(err.Metadata))
 	for k, v := range err.Metadata {
 		metadata[k] = v
@@ -131,20 +133,20 @@ func FromError(err error) *Error {
 		return se
 	}
 	gs, ok := status.FromError(err)
-	if ok {
-		ret := New(
-			httpstatus.FromGRPCCode(gs.Code()),
-			UnknownReason,
-			gs.Message(),
-		)
-		for _, detail := range gs.Details() {
-			switch d := detail.(type) {
-			case *errdetails.ErrorInfo:
-				ret.Reason = d.Reason
-				return ret.WithMetadata(d.Metadata)
-			}
-		}
-		return ret
+	if !ok {
+		return New(UnknownCode, UnknownReason, err.Error())
 	}
-	return New(UnknownCode, UnknownReason, err.Error())
+	ret := New(
+		httpstatus.FromGRPCCode(gs.Code()),
+		UnknownReason,
+		gs.Message(),
+	)
+	for _, detail := range gs.Details() {
+		switch d := detail.(type) {
+		case *errdetails.ErrorInfo:
+			ret.Reason = d.Reason
+			return ret.WithMetadata(d.Metadata)
+		}
+	}
+	return ret
 }

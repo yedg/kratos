@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	_ registry.Registrar = &Registry{}
-	_ registry.Discovery = &Registry{}
+	_ registry.Registrar = (*Registry)(nil)
+	_ registry.Discovery = (*Registry)(nil)
 )
 
 type Option func(o *Registry)
@@ -54,12 +54,16 @@ func New(eurekaUrls []string, opts ...Option) (*Registry, error) {
 		o(r)
 	}
 
-	client := NewClient(eurekaUrls, WithHeartbeatInterval(r.heartbeatInterval), WithClientContext(r.ctx), WithNamespace(r.eurekaPath))
+	client := NewClient(eurekaUrls,
+		WithHeartbeatInterval(r.heartbeatInterval),
+		WithClientContext(r.ctx),
+		WithNamespace(r.eurekaPath),
+	)
 	r.api = NewAPI(r.ctx, client, r.refreshInterval)
 	return r, nil
 }
 
-// 这里的Context是每个注册器独享的
+// Register 这里的Context是每个注册器独享的
 func (r *Registry) Register(ctx context.Context, service *registry.ServiceInstance) error {
 	return r.api.Register(ctx, service.Name, r.Endpoints(service)...)
 }
@@ -86,18 +90,15 @@ func (r *Registry) GetService(ctx context.Context, serviceName string) ([]*regis
 	return items, nil
 }
 
-// watch 是独立的ctx
+// Watch 是独立的ctx
 func (r *Registry) Watch(ctx context.Context, serviceName string) (registry.Watcher, error) {
 	return newWatch(ctx, r.api, serviceName)
 }
 
 func (r *Registry) Endpoints(service *registry.ServiceInstance) []Endpoint {
-	var (
-		res   = []Endpoint{}
-		start int
-	)
+	res := make([]Endpoint, 0, len(service.Endpoints))
 	for _, ep := range service.Endpoints {
-		start = strings.Index(ep, "//")
+		start := strings.Index(ep, "//")
 		end := strings.LastIndex(ep, ":")
 		appID := strings.ToUpper(service.Name)
 		ip := ep[start+2 : end]

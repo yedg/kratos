@@ -2,7 +2,6 @@ package selector
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,7 +10,7 @@ import (
 	"github.com/go-kratos/kratos/v2/transport"
 )
 
-var _ transport.Transporter = &Transport{}
+var _ transport.Transporter = (*Transport)(nil)
 
 type Transport struct {
 	kind      transport.Kind
@@ -41,15 +40,23 @@ func (tr *Transport) ReplyHeader() transport.Header {
 }
 
 type mockHeader struct {
-	m map[string]string
+	m map[string][]string
 }
 
 func (m *mockHeader) Get(key string) string {
-	return m.m[key]
+	vals := m.m[key]
+	if len(vals) > 0 {
+		return vals[0]
+	}
+	return ""
 }
 
 func (m *mockHeader) Set(key, value string) {
-	m.m[key] = value
+	m.m[key] = []string{value}
+}
+
+func (m *mockHeader) Add(key, value string) {
+	m.m[key] = append(m.m[key], value)
 }
 
 func (m *mockHeader) Keys() []string {
@@ -58,6 +65,10 @@ func (m *mockHeader) Keys() []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+func (m *mockHeader) Values(key string) []string {
+	return m.m[key]
 }
 
 func TestMatch(t *testing.T) {
@@ -85,7 +96,7 @@ func TestMatch(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			next := func(ctx context.Context, req interface{}) (interface{}, error) {
+			next := func(_ context.Context, req interface{}) (interface{}, error) {
 				t.Log(req)
 				return "reply", nil
 			}
@@ -121,7 +132,7 @@ func TestMatchClient(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			next := func(ctx context.Context, req interface{}) (interface{}, error) {
+			next := func(_ context.Context, req interface{}) (interface{}, error) {
 				t.Log(req)
 				return "reply", nil
 			}
@@ -156,11 +167,11 @@ func TestFunc(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			next := func(ctx context.Context, req interface{}) (interface{}, error) {
+			next := func(_ context.Context, req interface{}) (interface{}, error) {
 				t.Log(req)
 				return "reply", nil
 			}
-			next = Server(testMiddleware).Match(func(ctx context.Context, operation string) bool {
+			next = Server(testMiddleware).Match(func(_ context.Context, operation string) bool {
 				if strings.HasPrefix(operation, "/go-kratos.dev") || strings.HasSuffix(operation, "world") {
 					return true
 				}
@@ -186,38 +197,38 @@ func TestHeaderFunc(t *testing.T) {
 			name: "/hello.Update/world",
 			ctx: transport.NewServerContext(context.Background(), &Transport{
 				operation: "/hello.Update/world",
-				headers:   &mockHeader{map[string]string{"X-Test": "test"}},
+				headers:   &mockHeader{map[string][]string{"X-Test": {"test"}}},
 			}),
 		},
 		{
 			name: "/hi.Create/world",
 			ctx: transport.NewServerContext(context.Background(), &Transport{
 				operation: "/hi.Create/world",
-				headers:   &mockHeader{map[string]string{"X-Test": "test2", "go-kratos": "kratos"}},
+				headers:   &mockHeader{map[string][]string{"X-Test": {"test2"}, "go-kratos": {"kratos"}}},
 			}),
 		},
 		{
 			name: "/test.Name/1234",
 			ctx: transport.NewServerContext(context.Background(), &Transport{
 				operation: "/test.Name/1234",
-				headers:   &mockHeader{map[string]string{"X-Test": "test3"}},
+				headers:   &mockHeader{map[string][]string{"X-Test": {"test3"}}},
 			}),
 		},
 		{
 			name: "/go-kratos.dev/kratos",
 			ctx: transport.NewServerContext(context.Background(), &Transport{
 				operation: "/go-kratos.dev/kratos",
-				headers:   &mockHeader{map[string]string{"X-Test": "test"}},
+				headers:   &mockHeader{map[string][]string{"X-Test": {"test"}}},
 			}),
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			next := func(ctx context.Context, req interface{}) (interface{}, error) {
+			next := func(_ context.Context, req interface{}) (interface{}, error) {
 				t.Log(req)
 				return "reply", nil
 			}
-			next = Server(testMiddleware).Match(func(ctx context.Context, operation string) bool {
+			next = Server(testMiddleware).Match(func(ctx context.Context, _ string) bool {
 				tr, ok := transport.FromServerContext(ctx)
 				if !ok {
 					return false
@@ -243,9 +254,20 @@ func TestHeaderFunc(t *testing.T) {
 
 func testMiddleware(handler middleware.Handler) middleware.Handler {
 	return func(ctx context.Context, req interface{}) (reply interface{}, err error) {
-		fmt.Println("before")
 		reply, err = handler(ctx, req)
-		fmt.Println("after")
 		return
+	}
+}
+
+func Test_RegexMatch(t *testing.T) {
+	if regexMatch("^\b(?", "something") {
+		t.Error("The invalid regex must not match.")
+	}
+}
+
+func Test_matches(t *testing.T) {
+	b := Builder{}
+	if b.matches(context.Background(), func(_ context.Context) (transport.Transporter, bool) { return nil, false }) {
+		t.Error("The matches method must return false.")
 	}
 }

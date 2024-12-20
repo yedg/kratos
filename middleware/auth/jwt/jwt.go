@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/middleware"
@@ -104,19 +104,19 @@ func Server(keyFunc jwt.Keyfunc, opts ...Option) middleware.Middleware {
 					tokenInfo, err = jwt.Parse(jwtToken, keyFunc)
 				}
 				if err != nil {
-					if ve, ok := err.(*jwt.ValidationError); ok {
-						if ve.Errors&jwt.ValidationErrorMalformed != 0 {
-							return nil, ErrTokenInvalid
-						} else if ve.Errors&(jwt.ValidationErrorExpired|jwt.ValidationErrorNotValidYet) != 0 {
-							return nil, ErrTokenExpired
-						} else {
-							return nil, ErrTokenParseFail
-						}
+					if errors.Is(err, jwt.ErrTokenMalformed) || errors.Is(err, jwt.ErrTokenUnverifiable) {
+						return nil, ErrTokenInvalid
 					}
-					return nil, errors.Unauthorized(reason, err.Error())
-				} else if !tokenInfo.Valid {
+					if errors.Is(err, jwt.ErrTokenNotValidYet) || errors.Is(err, jwt.ErrTokenExpired) {
+						return nil, ErrTokenExpired
+					}
+					return nil, ErrTokenParseFail
+				}
+
+				if !tokenInfo.Valid {
 					return nil, ErrTokenInvalid
-				} else if tokenInfo.Method != o.signingMethod {
+				}
+				if tokenInfo.Method != o.signingMethod {
 					return nil, ErrUnSupportSigningMethod
 				}
 				ctx = NewContext(ctx, tokenInfo.Claims)

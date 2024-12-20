@@ -7,14 +7,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/go-kratos/kratos/v2/registry"
-
 	"github.com/hashicorp/consul/api"
+
+	"github.com/go-kratos/kratos/v2/registry"
 )
 
 var (
-	_ registry.Registrar = &Registry{}
-	_ registry.Discovery = &Registry{}
+	_ registry.Registrar = (*Registry)(nil)
+	_ registry.Discovery = (*Registry)(nil)
 )
 
 // Option is consul registry option.
@@ -24,6 +24,20 @@ type Option func(*Registry)
 func WithHealthCheck(enable bool) Option {
 	return func(o *Registry) {
 		o.enableHealthCheck = enable
+	}
+}
+
+// WithTimeout with get services timeout option.
+func WithTimeout(timeout time.Duration) Option {
+	return func(o *Registry) {
+		o.timeout = timeout
+	}
+}
+
+// WithDatacenter with registry datacenter option
+func WithDatacenter(dc Datacenter) Option {
+	return func(o *Registry) {
+		o.cli.dc = dc
 	}
 }
 
@@ -63,6 +77,15 @@ func WithDeregisterCriticalServiceAfter(interval int) Option {
 	}
 }
 
+// WithServiceCheck with service checks
+func WithServiceCheck(checks ...*api.AgentServiceCheck) Option {
+	return func(o *Registry) {
+		if o.cli != nil {
+			o.cli.serviceChecks = checks
+		}
+	}
+}
+
 // Config is consul registry config
 type Config struct {
 	*api.Config
@@ -74,18 +97,28 @@ type Registry struct {
 	enableHealthCheck bool
 	registry          map[string]*serviceSet
 	lock              sync.RWMutex
+	timeout           time.Duration
 }
 
 // New creates consul registry
 func New(apiClient *api.Client, opts ...Option) *Registry {
 	r := &Registry{
-		cli:               NewClient(apiClient),
 		registry:          make(map[string]*serviceSet),
 		enableHealthCheck: true,
+		timeout:           10 * time.Second,
+		cli: &Client{
+			dc:                             SingleDatacenter,
+			cli:                            apiClient,
+			resolver:                       defaultResolver,
+			healthcheckInterval:            10,
+			heartbeat:                      true,
+			deregisterCriticalServiceAfter: 600,
+		},
 	}
 	for _, o := range opts {
 		o(r)
 	}
+	r.cli.ctx, r.cli.cancel = context.WithCancel(context.Background())
 	return r
 }
 
@@ -100,19 +133,33 @@ func (r *Registry) Deregister(ctx context.Context, svc *registry.ServiceInstance
 }
 
 // GetService return service by name
-func (r *Registry) GetService(ctx context.Context, name string) (services []*registry.ServiceInstance, err error) {
+func (r *Registry) GetService(ctx context.Context, name string) ([]*registry.ServiceInstance, error) {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 	set := r.registry[name]
+
+	getRemote := func() []*registry.ServiceInstance {
+		services, _, err := r.cli.Service(ctx, name, 0, true)
+		if err == nil && len(services) > 0 {
+			return services
+		}
+		return nil
+	}
+
 	if set == nil {
+		if s := getRemote(); len(s) > 0 {
+			return s, nil
+		}
 		return nil, fmt.Errorf("service %s not resolved in registry", name)
 	}
 	ss, _ := set.services.Load().([]*registry.ServiceInstance)
 	if ss == nil {
+		if s := getRemote(); len(s) > 0 {
+			return s, nil
+		}
 		return nil, fmt.Errorf("service %s not found in registry", name)
 	}
-	services = append(services, ss...)
-	return
+	return ss, nil
 }
 
 // ListServices return service list.
@@ -146,11 +193,11 @@ func (r *Registry) Watch(ctx context.Context, name string) (registry.Watcher, er
 		r.registry[name] = set
 	}
 
-	// 初始化watcher
+	// init watcher
 	w := &watcher{
 		event: make(chan struct{}, 1),
 	}
-	w.ctx, w.cancel = context.WithCancel(context.Background())
+	w.ctx, w.cancel = context.WithCancel(ctx)
 	w.set = set
 	set.lock.Lock()
 	set.watcher[w] = struct{}{}
@@ -161,42 +208,50 @@ func (r *Registry) Watch(ctx context.Context, name string) (registry.Watcher, er
 		// otherwise the initial data may be blocked forever during the watch.
 		w.event <- struct{}{}
 	}
-
-	if !ok {
-		err := r.resolve(set)
-		if err != nil {
-			return nil, err
-		}
+	if err := r.resolve(ctx, set); err != nil {
+		return nil, err
 	}
 	return w, nil
 }
 
-func (r *Registry) resolve(ss *serviceSet) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-	services, idx, err := r.cli.Service(ctx, ss.serviceName, 0, true)
-	cancel()
+func (r *Registry) resolve(ctx context.Context, ss *serviceSet) error {
+	listServices := r.cli.Service
+	if r.timeout > 0 {
+		listServices = func(ctx context.Context, service string, index uint64, passingOnly bool) ([]*registry.ServiceInstance, uint64, error) {
+			timeoutCtx, cancel := context.WithTimeout(ctx, r.timeout)
+			defer cancel()
+
+			return r.cli.Service(timeoutCtx, service, index, passingOnly)
+		}
+	}
+
+	services, idx, err := listServices(ctx, ss.serviceName, 0, true)
 	if err != nil {
 		return err
-	} else if len(services) > 0 {
+	}
+	if len(services) > 0 {
 		ss.broadcast(services)
 	}
+
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
-			<-ticker.C
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*120)
-			tmpService, tmpIdx, err := r.cli.Service(ctx, ss.serviceName, idx, true)
-			cancel()
-			if err != nil {
-				time.Sleep(time.Second)
-				continue
+			select {
+			case <-ticker.C:
+				tmpService, tmpIdx, err := listServices(context.Background(), ss.serviceName, idx, true)
+				if err != nil {
+					time.Sleep(time.Second)
+					continue
+				}
+				if len(tmpService) != 0 && tmpIdx != idx {
+					services = tmpService
+					ss.broadcast(services)
+				}
+				idx = tmpIdx
+			case <-ctx.Done():
+				return
 			}
-			if len(tmpService) != 0 && tmpIdx != idx {
-				services = tmpService
-				ss.broadcast(services)
-			}
-			idx = tmpIdx
 		}
 	}()
 

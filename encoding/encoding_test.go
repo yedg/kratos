@@ -2,18 +2,17 @@ package encoding
 
 import (
 	"encoding/xml"
-	"fmt"
 	"runtime/debug"
 	"testing"
 )
 
 type codec struct{}
 
-func (c codec) Marshal(v interface{}) ([]byte, error) {
+func (c codec) Marshal(_ interface{}) ([]byte, error) {
 	panic("implement me")
 }
 
-func (c codec) Unmarshal(data []byte, v interface{}) error {
+func (c codec) Unmarshal(_ []byte, _ interface{}) error {
 	panic("implement me")
 }
 
@@ -40,7 +39,7 @@ func TestRegisterCodec(t *testing.T) {
 	f := func() { RegisterCodec(nil) }
 	funcDidPanic, panicValue, _ := didPanic(f)
 	if !funcDidPanic {
-		t.Fatalf(fmt.Sprintf("func should panic\n\tPanic value:\t%#v", panicValue))
+		t.Fatalf("func should panic\n\tPanic value:\t%#v", panicValue)
 	}
 	if panicValue != "cannot register a nil Codec" {
 		t.Fatalf("panic error got %s want cannot register a nil Codec", panicValue)
@@ -50,7 +49,7 @@ func TestRegisterCodec(t *testing.T) {
 	}
 	funcDidPanic, panicValue, _ = didPanic(f)
 	if !funcDidPanic {
-		t.Fatalf(fmt.Sprintf("func should panic\n\tPanic value:\t%#v", panicValue))
+		t.Fatalf("func should panic\n\tPanic value:\t%#v", panicValue)
 	}
 	if panicValue != "cannot register Codec with empty string result for Name()" {
 		t.Fatalf("panic error got %s want cannot register Codec with empty string result for Name()", panicValue)
@@ -63,7 +62,7 @@ func TestRegisterCodec(t *testing.T) {
 	}
 }
 
-// PanicTestFunc defines a func that should be passed to the assert.Panics and assert.NotPanics
+// PanicTestFunc defines a func that should be passed to assert.Panics and assert.NotPanics
 // methods, and represents a simple func that takes no arguments, and returns nothing.
 type PanicTestFunc func()
 
